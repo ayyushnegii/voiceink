@@ -29,7 +29,6 @@ class AudioManager {
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-
       this.mediaRecorder = new MediaRecorder(stream);
       this.audioChunks = [];
 
@@ -40,26 +39,37 @@ class AudioManager {
       this.mediaRecorder.onstop = async () => {
         this.isRecording = false;
         this.isProcessing = true;
-        this.onStateChange?.({ isRecording: false, isProcessing: true });
+        this._vadHandle?.stop();
+        this._levelHandle?.stop();
+        this.onStateChange?.({ isRecording: false, isProcessing: true, audioLevel: 0 });
 
         const audioBlob = new Blob(this.audioChunks, { type: "audio/wav" });
-        
-        if (audioBlob.size === 0) {
-        }
-        
         await this.processAudio(audioBlob);
-
-        // Clean up stream
         stream.getTracks().forEach((track) => track.stop());
       };
 
       this.mediaRecorder.start();
       this.isRecording = true;
-      this.onStateChange?.({ isRecording: true, isProcessing: false });
+      this.onStateChange?.({ isRecording: true, isProcessing: false, audioLevel: 0 });
+
+      // Start real-time audio level monitor for waveform UI
+      this._levelHandle = this.startLevelMonitor(stream, (level) => {
+        this.onStateChange?.({ isRecording: true, isProcessing: false, audioLevel: level });
+      });
+
+      // Auto-stop on silence if VAD enabled
+      const useVAD = localStorage.getItem("useVAD") !== "false"; // default ON
+      if (useVAD) {
+        this._vadHandle = this.startVAD(stream, {
+          silenceDuration: parseInt(localStorage.getItem("vadSilenceDuration") || "1500"),
+          onSilence: () => {
+            if (this.isRecording) this.stopRecording();
+          }
+        });
+      }
 
       return true;
     } catch (error) {
-      
       // Provide more specific error messages
       let errorTitle = "Recording Error";
       let errorDescription = `Failed to access microphone: ${error.message}`;
@@ -393,10 +403,84 @@ class AudioManager {
   async processWithReasoningModel(text, context = null, hinglishMode = false) {
     try {
       const model = localStorage.getItem("reasoningModel") || "gpt-3.5-turbo";
-      return await ReasoningService.processText(text, model, context);
+      // FIX: Pass hinglishMode through to ReasoningService (was silently dropped)
+      return await ReasoningService.processText(text, model, context, hinglishMode);
     } catch (error) {
       return AudioManager.cleanTranscription(text);
     }
+  }
+
+  // VAD: Voice Activity Detection — auto-stop recording after silence
+  // Returns a promise that resolves when silence is detected
+  startVAD(stream, { silenceThreshold = 0.01, silenceDuration = 1500, onSilence } = {}) {
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const source = audioContext.createMediaStreamSource(stream);
+    const analyser = audioContext.createAnalyser();
+    analyser.fftSize = 512;
+    source.connect(analyser);
+
+    const buffer = new Float32Array(analyser.fftSize);
+    let silenceStart = null;
+    let rafId = null;
+    let stopped = false;
+
+    const check = () => {
+      if (stopped) return;
+      analyser.getFloatTimeDomainData(buffer);
+      const rms = Math.sqrt(buffer.reduce((s, v) => s + v * v, 0) / buffer.length);
+
+      if (rms < silenceThreshold) {
+        if (!silenceStart) silenceStart = Date.now();
+        else if (Date.now() - silenceStart >= silenceDuration) {
+          stopped = true;
+          audioContext.close();
+          onSilence?.();
+          return;
+        }
+      } else {
+        silenceStart = null;
+      }
+      rafId = requestAnimationFrame(check);
+    };
+    check();
+
+    return {
+      stop: () => {
+        stopped = true;
+        if (rafId) cancelAnimationFrame(rafId);
+        audioContext.close().catch(() => {});
+      }
+    };
+  }
+
+  // Real-time audio level monitor (for UI waveform feedback)
+  startLevelMonitor(stream, onLevel) {
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const source = audioContext.createMediaStreamSource(stream);
+    const analyser = audioContext.createAnalyser();
+    analyser.fftSize = 256;
+    source.connect(analyser);
+
+    const buffer = new Uint8Array(analyser.frequencyBinCount);
+    let rafId = null;
+    let stopped = false;
+
+    const tick = () => {
+      if (stopped) return;
+      analyser.getByteFrequencyData(buffer);
+      const avg = buffer.reduce((s, v) => s + v, 0) / buffer.length;
+      onLevel?.(avg / 255); // normalize 0-1
+      rafId = requestAnimationFrame(tick);
+    };
+    tick();
+
+    return {
+      stop: () => {
+        stopped = true;
+        if (rafId) cancelAnimationFrame(rafId);
+        audioContext.close().catch(() => {});
+      }
+    };
   }
 
   async processWithOpenAIAPI(audioBlob, context = null, hinglishMode = false) {

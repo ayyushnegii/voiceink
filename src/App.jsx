@@ -20,22 +20,25 @@ const SoundWaveIcon = ({ size = 16 }) => {
   );
 };
 
-// Voice Wave Animation Component (for processing state)
-const VoiceWaveIndicator = ({ isListening }) => {
+// Live waveform bars driven by real audio level from AudioManager
+const VoiceWaveIndicator = ({ isListening, audioLevel = 0 }) => {
+  const bars = 5;
   return (
     <div className="flex items-center justify-center gap-0.5">
-      {[...Array(4)].map((_, i) => (
-        <div
-          key={i}
-          className={`w-0.5 bg-white rounded-full transition-all duration-150 ${
-            isListening ? "animate-pulse h-4" : "h-2"
-          }`}
-          style={{
-            animationDelay: isListening ? `${i * 0.1}s` : "0s",
-            animationDuration: isListening ? `${0.6 + i * 0.1}s` : "0s",
-          }}
-        />
-      ))}
+      {[...Array(bars)].map((_, i) => {
+        // Each bar gets a slightly offset amplitude for visual spread
+        const spread = [0.6, 0.9, 1.0, 0.9, 0.6][i];
+        const height = isListening
+          ? Math.max(4, Math.min(18, 4 + audioLevel * 14 * spread))
+          : 4;
+        return (
+          <div
+            key={i}
+            className="w-0.5 bg-white rounded-full"
+            style={{ height, transition: "height 80ms ease-out" }}
+          />
+        );
+      })}
     </div>
   );
 };
@@ -65,6 +68,7 @@ const Tooltip = ({ children, content, emoji }) => {
 export default function App() {
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [audioLevel, setAudioLevel] = useState(0);
   const [transcript, setTranscript] = useState("");
   const [error, setError] = useState("");
   const [isHovered, setIsHovered] = useState(false);
@@ -91,9 +95,10 @@ export default function App() {
       audioManagerRef.current = new AudioManager();
     }
     audioManagerRef.current.setCallbacks({
-      onStateChange: ({ isRecording, isProcessing }) => {
+      onStateChange: ({ isRecording, isProcessing, audioLevel }) => {
         setIsRecording(isRecording);
         setIsProcessing(isProcessing);
+        if (audioLevel !== undefined) setAudioLevel(audioLevel);
       },
       onError: (err) => {
         toast({ title: err.title, description: err.description, variant: "destructive" });
@@ -265,9 +270,9 @@ export default function App() {
             {micState === "idle" || micState === "hover" ? (
               <SoundWaveIcon size={micState === "idle" ? 12 : 14} />
             ) : micState === "recording" ? (
-              <LoadingDots />
+              <VoiceWaveIndicator isListening={true} audioLevel={audioLevel} />
             ) : micState === "processing" ? (
-              <VoiceWaveIndicator isListening={true} />
+              <VoiceWaveIndicator isListening={false} />
             ) : null}
 
             {micState === "recording" && (
