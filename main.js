@@ -25,7 +25,7 @@ const WhisperManager = require("./src/helpers/whisper");
 const TrayManager = require("./src/helpers/tray");
 const IPCHandlers = require("./src/helpers/ipcHandlers");
 const UpdateManager = require("./src/updater");
-const HotkeyManager = require("./src/helpers/hotkeyManager");
+// FIX: HotkeyManager no longer imported here — windowManager owns it
 const WindowContextDetector = require("./src/helpers/windowContextDetector");
 
 // Set up PATH for production builds to find system Python
@@ -63,7 +63,7 @@ const clipboardManager = new ClipboardManager();
 const whisperManager = new WhisperManager();
 const trayManager = new TrayManager();
 const updateManager = new UpdateManager();
-const hotkeyManager = new HotkeyManager();
+// FIX: Removed duplicate HotkeyManager — windowManager already owns one internally
 const windowContextDetector = new WindowContextDetector();
 
 // Initialize IPC handlers with all managers
@@ -125,7 +125,8 @@ async function startApp() {
   updateManager.checkForUpdatesOnStartup();
 
   // Initialize global hotkey for dictation (default: backtick `)
-  hotkeyManager.initializeHotkey(windowManager.mainWindow, () => {
+  // FIX: Use windowManager's internal hotkeyManager — avoids double registration
+  windowManager.initializeHotkey(windowManager.mainWindow, () => {
     const mainWindow = windowManager.mainWindow;
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('toggle-dictation');

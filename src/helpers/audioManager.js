@@ -390,7 +390,7 @@ class AudioManager {
     return new Blob([arrayBuffer], { type: "audio/wav" });
   }
 
-  async processWithReasoningModel(text, context = null) {
+  async processWithReasoningModel(text, context = null, hinglishMode = false) {
     try {
       const model = localStorage.getItem("reasoningModel") || "gpt-3.5-turbo";
       return await ReasoningService.processText(text, model, context);

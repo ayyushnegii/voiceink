@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import "./index.css";
-import { useToast } from "./ui/Toast";
-import { LoadingDots } from "./ui/LoadingDots";
+// FIX: Corrected import paths (were ./ui/Toast and ./ui/LoadingDots — wrong paths)
+import { useToast } from "./components/ui/Toast";
+import { LoadingDots } from "./components/ui/LoadingDots";
 import { useHotkey } from "./hooks/useHotkey";
 import { useWindowDrag } from "./hooks/useWindowDrag";
 import AudioManager from "./helpers/audioManager";
@@ -12,18 +13,9 @@ import { applyVocabulary } from "./utils/vocabularyUtils";
 const SoundWaveIcon = ({ size = 16 }) => {
   return (
     <div className="flex items-center justify-center gap-1">
-      <div
-        className={`bg-white rounded-full`}
-        style={{ width: size * 0.25, height: size * 0.6 }}
-      ></div>
-      <div
-        className={`bg-white rounded-full`}
-        style={{ width: size * 0.25, height: size }}
-      ></div>
-      <div
-        className={`bg-white rounded-full`}
-        style={{ width: size * 0.25, height: size * 0.6 }}
-      ></div>
+      <div className="bg-white rounded-full" style={{ width: size * 0.25, height: size * 0.6 }}></div>
+      <div className="bg-white rounded-full" style={{ width: size * 0.25, height: size }}></div>
+      <div className="bg-white rounded-full" style={{ width: size * 0.25, height: size * 0.6 }}></div>
     </div>
   );
 };
@@ -51,13 +43,9 @@ const VoiceWaveIndicator = ({ isListening }) => {
 // Enhanced Tooltip Component
 const Tooltip = ({ children, content, emoji }) => {
   const [isVisible, setIsVisible] = useState(false);
-
   return (
     <div className="relative inline-block">
-      <div
-        onMouseEnter={() => setIsVisible(true)}
-        onMouseLeave={() => setIsVisible(false)}
-      >
+      <div onMouseEnter={() => setIsVisible(true)} onMouseLeave={() => setIsVisible(false)}>
         {children}
       </div>
       {isVisible && (
@@ -82,52 +70,79 @@ export default function App() {
   const [isHovered, setIsHovered] = useState(false);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
+  // FIX: Single stable AudioManager instance — never re-created per call
+  const audioManagerRef = useRef(null);
+  // FIX: Refs mirror state so IPC toggle handler is never stale
+  const isRecordingRef = useRef(false);
+  const isProcessingRef = useRef(false);
   const { toast } = useToast();
   const { hotkey } = useHotkey();
-  const { isDragging, handleMouseDown, handleMouseUp, handleClick } =
-    useWindowDrag();
+  const { isDragging, handleMouseDown, handleMouseUp } = useWindowDrag();
   const [dragStartPos, setDragStartPos] = useState(null);
   const [hasDragged, setHasDragged] = useState(false);
+
+  // Keep refs in sync with state
+  useEffect(() => { isRecordingRef.current = isRecording; }, [isRecording]);
+  useEffect(() => { isProcessingRef.current = isProcessing; }, [isProcessing]);
+
+  // Returns single AudioManager instance, always refreshing callbacks
+  const getAudioManager = useCallback(() => {
+    if (!audioManagerRef.current) {
+      audioManagerRef.current = new AudioManager();
+    }
+    audioManagerRef.current.setCallbacks({
+      onStateChange: ({ isRecording, isProcessing }) => {
+        setIsRecording(isRecording);
+        setIsProcessing(isProcessing);
+      },
+      onError: (err) => {
+        toast({ title: err.title, description: err.description, variant: "destructive" });
+      },
+      onTranscriptionComplete: async (result) => {
+        if (result.success && result.text) {
+          let text = result.text;
+          text = applySnippets(text);
+          text = applyVocabulary(text);
+          setTranscript(text);
+          const pastePromise = safePaste(text);
+          window.electronAPI.saveTranscription(text).catch((e) =>
+            console.error("Failed to save transcription:", e)
+          );
+          await pastePromise;
+        }
+      },
+    });
+    return audioManagerRef.current;
+  }, [toast]);
 
   const startRecording = async () => {
     try {
       setError("");
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
       mediaRecorderRef.current = new window.MediaRecorder(stream);
       audioChunksRef.current = [];
-
       mediaRecorderRef.current.ondataavailable = (event) => {
         audioChunksRef.current.push(event.data);
       };
-
       mediaRecorderRef.current.onstop = async () => {
         setIsProcessing(true);
-        const audioBlob = new Blob(audioChunksRef.current, {
-          type: "audio/wav",
-        });
-        // Start processing immediately without waiting
+        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/wav" });
         processAudio(audioBlob);
         stream.getTracks().forEach((track) => track.stop());
       };
-
       mediaRecorderRef.current.start();
       setIsRecording(true);
     } catch (err) {
       console.error("Recording error:", err);
-      toast({
-        title: "Recording Error",
-        description: "Failed to access microphone: " + err.message,
-        variant: "destructive",
-      });
+      toast({ title: "Recording Error", description: "Failed to access microphone: " + err.message, variant: "destructive" });
     }
   };
 
   const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
+    // FIX: use ref to avoid stale closure
+    if (mediaRecorderRef.current && isRecordingRef.current) {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
-      // Don't set processing immediately - let the onstop handler do it
     }
   };
 
@@ -135,161 +150,77 @@ export default function App() {
     try {
       await window.electronAPI.pasteText(text);
     } catch (err) {
-      toast({
-        title: "Paste Error",
-        description:
-          "Failed to paste text. Please check accessibility permissions.",
-        variant: "destructive",
-      });
+      toast({ title: "Paste Error", description: "Failed to paste text. Please check accessibility permissions.", variant: "destructive" });
     }
   };
 
   const processAudio = async (audioBlob) => {
     try {
       console.log(`🎧 [App] 🎬 Starting audio processing...`);
-
-      // Use our enhanced AudioManager with reasoning support
-      const audioManager = new AudioManager();
-      audioManager.setCallbacks({
-        onStateChange: ({ isRecording, isProcessing }) => {
-          setIsRecording(isRecording);
-          setIsProcessing(isProcessing);
-        },
-        onError: (error) => {
-          toast({
-            title: error.title,
-            description: error.description,
-            variant: "destructive",
-          });
-        },
-        onTranscriptionComplete: async (result) => {
-          console.log(
-            `🎧 [App] ✅ Transcription completed with source: ${result.source}`
-          );
-          if (result.success && result.text) {
-            let text = result.text;
-            
-            // Apply voice snippets
-            text = applySnippets(text);
-            
-            // Apply custom vocabulary corrections
-            text = applyVocabulary(text);
-            
-            setTranscript(text);
-
-            // Paste immediately - don't wait for database save
-            const pastePromise = safePaste(text);
-
-            // Save to database in parallel
-            const savePromise = window.electronAPI
-              .saveTranscription(text)
-              .catch((err) => {
-                console.error("Failed to save transcription:", err);
-              });
-
-            // Wait for paste to complete, but don't block on database save
-            await pastePromise;
-          }
-        },
-      });
-
-      // Process the audio using our enhanced AudioManager
+      // FIX: reuse stable instance, don't new AudioManager() every call
+      const audioManager = getAudioManager();
       await audioManager.processAudio(audioBlob);
     } catch (err) {
       console.error(`🎧 [App] ❌ Transcription error:`, err);
-      toast({
-        title: "Transcription Error",
-        description: "Transcription failed: " + err.message,
-        variant: "destructive",
-      });
+      toast({ title: "Transcription Error", description: "Transcription failed: " + err.message, variant: "destructive" });
     } finally {
-      setIsProcessing(false);
+      // Safety net only — AudioManager callbacks are primary source of truth
+      setIsProcessing((prev) => (prev ? false : prev));
     }
   };
 
-  const handleClose = () => {
-    window.electronAPI.hideWindow();
-  };
+  const handleClose = () => window.electronAPI.hideWindow();
 
+  // FIX: Register IPC listener ONCE. Refs handle freshness — no stale closure, no accumulating listeners.
   useEffect(() => {
-    let recording = false;
     const handleToggle = () => {
-      if (!recording && !isRecording && !isProcessing) {
+      if (!isRecordingRef.current && !isProcessingRef.current) {
         startRecording();
-        recording = true;
-      } else if (isRecording) {
+      } else if (isRecordingRef.current) {
         stopRecording();
-        recording = false;
       }
     };
-    window.electronAPI.onToggleDictation(handleToggle);
-    return () => {
-      // No need to remove listener, as it's handled in preload
-    };
-  }, [isRecording, isProcessing]);
+    const cleanup = window.electronAPI.onToggleDictation(handleToggle);
+    return () => { if (typeof cleanup === "function") cleanup(); };
+  }, []); // empty deps intentional — refs handle freshness
 
   const toggleListening = () => {
-    if (!isRecording && !isProcessing) {
-      startRecording();
-    } else if (isRecording) {
-      stopRecording();
-    }
-  };
-
-  const handleKeyPress = (e) => {
-    if (e.key === "Escape") {
-      handleClose();
-    }
+    if (!isRecordingRef.current && !isProcessingRef.current) startRecording();
+    else if (isRecordingRef.current) stopRecording();
   };
 
   useEffect(() => {
+    const handleKeyPress = (e) => { if (e.key === "Escape") handleClose(); };
     document.addEventListener("keydown", handleKeyPress);
     return () => document.removeEventListener("keydown", handleKeyPress);
   }, []);
 
-  // Determine current mic state
+  // Cleanup AudioManager on unmount
+  useEffect(() => {
+    return () => { if (audioManagerRef.current) audioManagerRef.current.cleanup(); };
+  }, []);
+
   const getMicState = () => {
     if (isRecording) return "recording";
     if (isProcessing) return "processing";
-    if (isHovered && !isRecording && !isProcessing) return "hover";
+    if (isHovered) return "hover";
     return "idle";
   };
 
   const micState = getMicState();
-  const isListening = isRecording || isProcessing;
 
-  // Get microphone button properties based on state
   const getMicButtonProps = () => {
-    const baseClasses =
-      "rounded-full w-10 h-10 flex items-center justify-center relative overflow-hidden border-2 border-white/70 cursor-pointer";
-
+    const base = "rounded-full w-10 h-10 flex items-center justify-center relative overflow-hidden border-2 border-white/70 cursor-pointer";
     switch (micState) {
       case "idle":
-        return {
-          className: `${baseClasses} bg-black/50 cursor-pointer`,
-          tooltip: `Press [${hotkey}] to speak`,
-        };
       case "hover":
-        return {
-          className: `${baseClasses} bg-black/50 cursor-pointer`,
-          tooltip: `Press [${hotkey}] to speak`,
-        };
+        return { className: `${base} bg-black/50`, tooltip: `Press [${hotkey}] to speak` };
       case "recording":
-        return {
-          className: `${baseClasses} bg-blue-600 cursor-pointer`,
-          tooltip: "Recording...",
-        };
+        return { className: `${base} bg-blue-600`, tooltip: "Recording..." };
       case "processing":
-        return {
-          className: `${baseClasses} bg-purple-600 cursor-not-allowed`,
-          tooltip: "Processing...",
-        };
+        return { className: `${base} bg-purple-600 cursor-not-allowed`, tooltip: "Processing..." };
       default:
-        return {
-          className: `${baseClasses} bg-black/50 cursor-pointer`,
-          style: { transform: "scale(0.8)" },
-          tooltip: "Click to speak",
-        };
+        return { className: `${base} bg-black/50`, style: { transform: "scale(0.8)" }, tooltip: "Click to speak" };
     }
   };
 
@@ -297,38 +228,22 @@ export default function App() {
 
   return (
     <>
-      {/* Fixed bottom-right voice button */}
       <div className="fixed bottom-6 right-6 z-50">
         <Tooltip content={micProps.tooltip}>
           <button
             onMouseDown={(e) => {
-              const rect = e.currentTarget.getBoundingClientRect();
               setDragStartPos({ x: e.clientX, y: e.clientY });
               setHasDragged(false);
               handleMouseDown(e);
             }}
             onMouseMove={(e) => {
               if (dragStartPos && !hasDragged) {
-                const distance = Math.sqrt(
-                  Math.pow(e.clientX - dragStartPos.x, 2) +
-                    Math.pow(e.clientY - dragStartPos.y, 2)
-                );
-                if (distance > 5) {
-                  // 5px threshold for drag
-                  setHasDragged(true);
-                }
+                const dist = Math.sqrt(Math.pow(e.clientX - dragStartPos.x, 2) + Math.pow(e.clientY - dragStartPos.y, 2));
+                if (dist > 5) setHasDragged(true);
               }
             }}
-            onMouseUp={(e) => {
-              handleMouseUp(e);
-              setDragStartPos(null);
-            }}
-            onClick={(e) => {
-              if (!hasDragged) {
-                toggleListening();
-              }
-              e.preventDefault();
-            }}
+            onMouseUp={(e) => { handleMouseUp(e); setDragStartPos(null); }}
+            onClick={(e) => { if (!hasDragged) toggleListening(); e.preventDefault(); }}
             onMouseEnter={() => setIsHovered(true)}
             onMouseLeave={() => setIsHovered(false)}
             onFocus={() => setIsHovered(true)}
@@ -337,30 +252,16 @@ export default function App() {
             disabled={micState === "processing"}
             style={{
               ...micProps.style,
-              cursor:
-                micState === "processing"
-                  ? "not-allowed !important"
-                  : isDragging
-                  ? "grabbing !important"
-                  : "pointer !important",
-              transition:
-                "transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.25s ease-out",
+              // FIX: removed invalid "!important" suffix from inline cursor strings
+              cursor: micState === "processing" ? "not-allowed" : isDragging ? "grabbing" : "pointer",
+              transition: "transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.25s ease-out",
             }}
           >
-            {/* Background effects */}
-            <div
-              className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent transition-opacity duration-150"
-              style={{ opacity: micState === "hover" ? 0.8 : 0 }}
-            ></div>
-            <div
-              className="absolute inset-0 transition-colors duration-150"
-              style={{
-                backgroundColor:
-                  micState === "hover" ? "rgba(0,0,0,0.1)" : "transparent",
-              }}
-            ></div>
+            <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent transition-opacity duration-150"
+              style={{ opacity: micState === "hover" ? 0.8 : 0 }}></div>
+            <div className="absolute inset-0 transition-colors duration-150"
+              style={{ backgroundColor: micState === "hover" ? "rgba(0,0,0,0.1)" : "transparent" }}></div>
 
-            {/* Dynamic content based on state */}
             {micState === "idle" || micState === "hover" ? (
               <SoundWaveIcon size={micState === "idle" ? 12 : 14} />
             ) : micState === "recording" ? (
@@ -369,12 +270,9 @@ export default function App() {
               <VoiceWaveIndicator isListening={true} />
             ) : null}
 
-            {/* State indicator ring for recording */}
             {micState === "recording" && (
               <div className="absolute inset-0 rounded-full border-2 border-blue-300 animate-pulse"></div>
             )}
-
-            {/* State indicator ring for processing */}
             {micState === "processing" && (
               <div className="absolute inset-0 rounded-full border-2 border-purple-300 opacity-50"></div>
             )}
