@@ -616,6 +616,10 @@ class AudioManager {
     if (this.mediaRecorder && this.isRecording) {
       this.stopRecording();
     }
+    this._vadHandle?.stop();
+    this._levelHandle?.stop();
+    this._vadHandle = null;
+    this._levelHandle = null;
     this.onStateChange = null;
     this.onError = null;
     this.onTranscriptionComplete = null;

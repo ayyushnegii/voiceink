@@ -134,15 +134,15 @@ class ReasoningService {
     this.apiKeyCache = new Map();
   }
 
-  async processText(text, model = "gpt-3.5-turbo", context = null) {
+  async processText(text, model = "gpt-3.5-turbo", context = null, hinglishMode = false) {
     const provider = getModelProvider(model);
 
     try {
       switch (provider) {
         case "openai":
-          return await this.processWithOpenAI(text, model, context);
+          return await this.processWithOpenAI(text, model, context, hinglishMode);
         case "anthropic":
-          return await this.processWithAnthropic(text, model, context);
+          return await this.processWithAnthropic(text, model, context, hinglishMode);
         default:
           throw new Error(`Unsupported reasoning provider: ${provider}`);
       }
@@ -152,19 +152,21 @@ class ReasoningService {
     }
   }
 
-  async processWithOpenAI(text, model, context = null) {
-    const apiKey = await this.getAPIKey("openai");
-    const agentName = getAgentName();
-    let prompt = getReasoningPrompt(text, agentName).replace(
-      "{{text}}",
-      text
-    );
-    
-    // Add context-aware prompt if available
+  _buildPrompt(text, agentName, context, hinglishMode) {
+    let prompt = getReasoningPrompt(text, agentName).replace("{{text}}", text);
+    if (hinglishMode) {
+      prompt = `The user speaks Hinglish (Hindi + English mixed). Preserve Hindi words as-is, do not translate them to English. Keep code-switching natural.\n\n${prompt}`;
+    }
     if (context && context.prompt) {
       prompt = context.prompt + "\n\n" + prompt;
     }
-    
+    return prompt;
+  }
+
+  async processWithOpenAI(text, model, context = null, hinglishMode = false) {
+    const apiKey = await this.getAPIKey("openai");
+    const agentName = getAgentName();
+    const prompt = this._buildPrompt(text, agentName, context, hinglishMode);
     const maxTokens = Math.max(100, text.length * 2);
 
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -196,19 +198,10 @@ class ReasoningService {
     return reasonedText;
   }
 
-  async processWithAnthropic(text, model, context = null) {
+  async processWithAnthropic(text, model, context = null, hinglishMode = false) {
     const apiKey = await this.getAPIKey("anthropic");
     const agentName = getAgentName();
-    let prompt = getReasoningPrompt(text, agentName).replace(
-      "{{text}}",
-      text
-    );
-    
-    // Add context-aware prompt if available
-    if (context && context.prompt) {
-      prompt = context.prompt + "\n\n" + prompt;
-    }
-    
+    const prompt = this._buildPrompt(text, agentName, context, hinglishMode);
     const maxTokens = Math.max(100, text.length * 2);
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {

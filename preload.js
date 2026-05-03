@@ -4,7 +4,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
   pasteText: (text) => ipcRenderer.invoke("paste-text", text),
   hideWindow: () => ipcRenderer.invoke("hide-window"),
   showDictationPanel: () => ipcRenderer.invoke("show-dictation-panel"),
-  onToggleDictation: (callback) => ipcRenderer.on("toggle-dictation", callback),
+  // FIX: Returns a cleanup function so App.jsx can remove the listener on unmount (prevents leak)
+  onToggleDictation: (callback) => {
+    ipcRenderer.on("toggle-dictation", callback);
+    return () => ipcRenderer.removeListener("toggle-dictation", callback);
+  },
 
   // Database functions
   saveTranscription: (text) =>

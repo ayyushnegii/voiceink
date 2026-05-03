@@ -123,15 +123,7 @@ async function startApp() {
     windowManager.controlPanelWindow
   );
   updateManager.checkForUpdatesOnStartup();
-
-  // Initialize global hotkey for dictation (default: backtick `)
-  // FIX: Use windowManager's internal hotkeyManager — avoids double registration
-  windowManager.initializeHotkey(windowManager.mainWindow, () => {
-    const mainWindow = windowManager.mainWindow;
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('toggle-dictation');
-    }
-  });
+  // NOTE: Hotkey is initialized inside windowManager.createMainWindow() — no extra call needed here
 }
 
 // App event handlers

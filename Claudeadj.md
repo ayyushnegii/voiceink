@@ -4,122 +4,142 @@
 
 ---
 
-## VoiceInk vs Wispr Flow — Honest Assessment
+## VoiceInk vs Wispr Flow — Current Status
 
-| Feature | Wispr Flow | VoiceInk (before) | VoiceInk (after) |
-|---|---|---|---|
-| Global hotkey dictation | ✅ | ✅ | ✅ |
-| Local on-device Whisper | ❌ (cloud only) | ✅ | ✅ |
-| Privacy — no data sent | ❌ | ✅ (local mode) | ✅ |
-| Context-aware tone (email/code/chat) | ✅ | ✅ | ✅ |
-| AI text cleanup (reasoning model) | ✅ | ✅ (broken) | ✅ (fixed) |
-| Hinglish / bilingual mode | ❌ | ✅ (broken) | ✅ (fixed) |
-| VAD — auto-stop on silence | ✅ | ❌ | ✅ NEW |
-| Real-time audio waveform feedback | ✅ | ❌ (fake animation) | ✅ NEW |
-| Text snippets / shortcuts | ❌ | ✅ | ✅ |
-| Custom vocabulary | ❌ | ✅ | ✅ |
-| Price | $19/month | Free + your API key | Free + your API key |
-| Open source | ❌ | ✅ | ✅ |
+| Feature | Wispr Flow ($19/mo) | VoiceInk (free) |
+|---|---|---|
+| Global hotkey dictation | ✅ | ✅ |
+| Local on-device Whisper | ❌ cloud only | ✅ |
+| Privacy — no data sent | ❌ | ✅ local mode |
+| Context-aware tone (email/code/chat) | ✅ | ✅ |
+| AI text cleanup (reasoning model) | ✅ | ✅ fixed |
+| Hinglish / bilingual mode | ❌ | ✅ fully fixed |
+| VAD — auto-stop on silence | ✅ | ✅ added |
+| Real-time audio waveform | ✅ | ✅ added (real mic data) |
+| Text snippets / shortcuts | ❌ | ✅ |
+| Custom vocabulary | ❌ | ✅ |
+| Open source | ❌ | ✅ |
 
-**VoiceInk now beats Wispr Flow** on: price (free vs $19/mo), privacy (local Whisper), open source, Hinglish support, and custom vocabulary/snippets. It matches on core dictation quality.
+**VoiceInk beats Wispr Flow** on price, privacy, open source, Hinglish, snippets, and vocabulary.
 
 ---
 
 ## Session 1 — Bug Fixes
 
-### Bug 1: Wrong UI Component Import Paths (`src/App.jsx`)
-- **Problem:** `./ui/Toast` and `./ui/LoadingDots` → missing `/components/` segment → crash at startup
-- **Fix:** Corrected to `./components/ui/Toast` and `./components/ui/LoadingDots`
+### Bug 1: Wrong UI Import Paths (`src/App.jsx`)
+`./ui/Toast` → `./components/ui/Toast` and same for `LoadingDots` — app crashed at startup.
 
-### Bug 2: AudioManager Recreated Every Recording (`src/App.jsx`)
-- **Problem:** `new AudioManager()` inside `processAudio()` → fresh instance each time → callbacks lost, memory leak
-- **Fix:** Single stable `useRef` instance; callbacks refreshed via `setCallbacks()` before each use
+### Bug 2: AudioManager Recreated Every Call (`src/App.jsx`)
+`new AudioManager()` inside `processAudio()` — new instance per recording, callbacks lost, memory leak.
+**Fix:** Single `useRef` instance, callbacks refreshed via `setCallbacks()`.
 
-### Bug 3: Stale Closure in IPC Toggle Handler (`src/App.jsx`)
-- **Problem:** `isRecording`/`isProcessing` captured at registration → global hotkey breaks after first use
-- **Fix:** `isRecordingRef` + `isProcessingRef` updated via `useEffect`; IPC handler reads refs
+### Bug 3: Stale Closure in IPC Toggle (`src/App.jsx`)
+`isRecording`/`isProcessing` captured at registration → hotkey broke after first use.
+**Fix:** `isRecordingRef`/`isProcessingRef` updated via `useEffect`; handler reads refs.
 
 ### Bug 4: Accumulating IPC Listeners (`src/App.jsx`)
-- **Problem:** Each render added a new `onToggleDictation` listener without cleanup → memory leak
-- **Fix:** `useEffect` returns cleanup function; empty deps `[]` is correct (refs handle freshness)
+Each render added another `toggle-dictation` listener with no cleanup.
+**Fix:** `useEffect` returns cleanup; `preload.js` now returns a remover function.
 
 ### Bug 5: Double HotkeyManager (`main.js`)
-- **Problem:** `main.js` instantiated `HotkeyManager` AND `WindowManager` does it internally → double hotkey registration, double-firing
-- **Fix:** Removed `HotkeyManager` from `main.js`; all hotkey management through `windowManager.initializeHotkey()`
+`main.js` created its own `HotkeyManager` AND `WindowManager` creates one — double hotkey registration.
+**Fix:** Removed `HotkeyManager` from `main.js` entirely.
 
-### Bug 6: `processWithReasoningModel` Parameter Mismatch (`src/helpers/audioManager.js`)
-- **Problem:** Defined as `(text, context)` but called as `(text, context, hinglishMode)` → Hinglish silently ignored in reasoning path
-- **Fix:** Added `hinglishMode = false` as third parameter
+### Bug 6: `processWithReasoningModel` Missing Parameter
+Defined as `(text, context)`, called as `(text, context, hinglishMode)` → Hinglish silently dropped.
+**Fix:** Added `hinglishMode = false` as third parameter.
 
 ---
 
-## Session 2 — Improvements (Beat Wispr Flow)
+## Session 2 — Improvements
 
-### Improvement 1: `hinglishMode` Passed Through to ReasoningService
-- **Problem:** Even after signature fix, `hinglishMode` was passed to `processWithReasoningModel` but not forwarded to `ReasoningService.processText()`
-- **Fix:** `ReasoningService.processText(text, model, context, hinglishMode)` — all 4 params now passed
+### Improvement 1: hinglishMode Fully Wired End-to-End
+- `audioManager.js`: `processWithReasoningModel(text, context, hinglishMode)` ✅
+- `ReasoningService.js`: `processText(text, model, context, hinglishMode)` ✅
+- `ReasoningService.js`: `processWithOpenAI` and `processWithAnthropic` both accept and use it ✅
+- `_buildPrompt()` injects Hinglish instruction into the prompt when enabled ✅
 
 ### Improvement 2: VAD — Voice Activity Detection (`src/helpers/audioManager.js`)
-- **What:** Auto-stops recording after 1.5s of silence (configurable via `vadSilenceDuration` localStorage key)
-- **How:** `startVAD(stream, { silenceDuration, onSilence })` — uses Web Audio API `AnalyserNode`, polls RMS level via `requestAnimationFrame`, fires `onSilence()` callback after threshold silence duration
-- **Enabled by default.** Disable: `localStorage.setItem("useVAD", "false")`
-- **This is the #1 thing Wispr Flow has that VoiceInk didn't**
+Auto-stops recording after silence. Uses Web Audio `AnalyserNode`, polls RMS each animation frame.
+- Default: ON, 1500ms silence threshold
+- Disable: `localStorage.setItem("useVAD", "false")`
+- Adjust: `localStorage.setItem("vadSilenceDuration", "2000")`
 
 ### Improvement 3: Real-Time Audio Level Monitor (`src/helpers/audioManager.js`)
-- **What:** Emits real microphone amplitude (0–1) via `onStateChange` callback during recording
-- **How:** `startLevelMonitor(stream, onLevel)` — `AnalyserNode` with `getByteFrequencyData`, averages frequency bins, calls `onLevel` every animation frame
-- **Wire-up:** `onStateChange` now receives `{ isRecording, isProcessing, audioLevel }` where `audioLevel` is 0–1
+`startLevelMonitor(stream, onLevel)` — emits mic amplitude (0–1) via `onStateChange` at 60fps.
+`onStateChange` now passes `{ isRecording, isProcessing, audioLevel }`.
 
 ### Improvement 4: Live Waveform UI (`src/App.jsx`)
-- **What:** 5-bar waveform that actually moves with your voice, replacing fake CSS pulse animation
-- **How:** `VoiceWaveIndicator` now takes `audioLevel` prop and sets bar heights dynamically using spread coefficients `[0.6, 0.9, 1.0, 0.9, 0.6]`
-- **Processing state:** Shows flat low bars (audio level 0) — visually distinct from idle
+5-bar waveform reacts to real mic data (was fake CSS pulse animation).
+`VoiceWaveIndicator` takes `audioLevel` prop; bar heights computed with spread coefficients.
 
 ---
 
-## Files Changed
+## Session 3 — Correctness Fixes
 
-| File | Changes |
+### Fix 1: Hotkey Registered Twice (`main.js`)
+`windowManager.createMainWindow()` already calls `initializeHotkey()` internally.
+Our extra call in `startApp()` registered the hotkey a second time — double-firing.
+**Fix:** Removed the redundant call from `startApp()` entirely.
+
+### Fix 2: `onToggleDictation` Listener Never Removed (`preload.js`)
+Old: `ipcRenderer.on("toggle-dictation", callback)` returned `undefined`.
+`App.jsx` tried to call the returned value as cleanup but the guard `typeof cleanup === "function"` silently skipped it — listeners accumulated.
+**Fix:** `preload.js` now returns `() => ipcRenderer.removeListener("toggle-dictation", callback)`.
+
+### Fix 3: `cleanup()` Didn't Stop VAD/Level Handles (`audioManager.js`)
+On unmount, VAD and level monitor `requestAnimationFrame` loops kept running.
+**Fix:** `cleanup()` now calls `this._vadHandle?.stop()` and `this._levelHandle?.stop()`.
+
+### Fix 4: `ReasoningService.processWithAnthropic` Missing hinglishMode
+Was fixed in OpenAI path but Anthropic path still used old 3-arg signature and manual prompt building.
+**Fix:** Both paths now use shared `_buildPrompt(text, agentName, context, hinglishMode)`.
+
+---
+
+## Files Changed (All Sessions)
+
+| File | What Changed |
 |---|---|
 | `src/App.jsx` | Import paths, stable AudioManager ref, stale closures, IPC cleanup, audioLevel state, live waveform |
-| `src/helpers/audioManager.js` | hinglishMode param fix, hinglishMode forwarded to ReasoningService, VAD, audio level monitor, startRecording wired to both |
-| `main.js` | Removed duplicate HotkeyManager |
+| `src/helpers/audioManager.js` | hinglishMode param, VAD, audio level monitor, cleanup() fixed |
+| `src/services/ReasoningService.js` | hinglishMode wired end-to-end, `_buildPrompt()` helper, Anthropic path fixed |
+| `main.js` | Removed duplicate HotkeyManager, removed redundant initializeHotkey() call |
+| `preload.js` | `onToggleDictation` returns proper cleanup/remover function |
 | `Claudeadj.md` | This file |
 
 ---
 
-## Architecture Notes
+## Architecture: Full Audio Flow (Corrected)
 
-### AudioManager Data Flow (Post-Fix)
 ```
-App.jsx
-  └─ getAudioManager() → single AudioManager ref
-       └─ setCallbacks({ onStateChange, onError, onTranscriptionComplete })
-            onStateChange({ isRecording, isProcessing, audioLevel })
-                 → setIsRecording / setIsProcessing / setAudioLevel
-
-AudioManager.startRecording()
-  ├─ startLevelMonitor(stream) → onStateChange({ audioLevel: 0-1 }) @ 60fps
-  ├─ startVAD(stream) → stopRecording() after silence
-  └─ MediaRecorder.onstop → processAudio(blob)
-       └─ processWithLocalWhisper OR processWithOpenAIAPI
-            └─ processWithReasoningModel(text, context, hinglishMode)
-                 └─ ReasoningService.processText(text, model, context, hinglishMode)
+Hotkey press → windowManager.hotkeyManager → mainWindow.webContents.send("toggle-dictation")
+  → preload.js ipcRenderer → App.jsx handleToggle (via ref, never stale)
+       → audioManager.startRecording()
+            ├─ startLevelMonitor() → onStateChange({ audioLevel }) @ 60fps → live waveform
+            ├─ startVAD() → stopRecording() after 1.5s silence
+            └─ MediaRecorder.onstop → processAudio(blob)
+                 ├─ processWithLocalWhisper(blob, model, context, hinglishMode)
+                 │    └─ [optional] processWithReasoningModel(text, context, hinglishMode)
+                 │             └─ ReasoningService.processText(text, model, context, hinglishMode)
+                 │                  └─ _buildPrompt() → injects hinglish + context instructions
+                 └─ processWithOpenAIAPI(blob, context, hinglishMode) [same path]
+                      └─ onTranscriptionComplete → applySnippets → applyVocabulary → paste
 ```
 
-### Key localStorage Settings
+## Key localStorage Settings
+
 | Key | Default | Description |
 |---|---|---|
 | `useVAD` | `"true"` | Auto-stop on silence |
-| `vadSilenceDuration` | `"1500"` | ms of silence before auto-stop |
-| `useLocalWhisper` | `"false"` | Use on-device Whisper |
+| `vadSilenceDuration` | `"1500"` | ms of silence before stop |
+| `useLocalWhisper` | `"false"` | On-device Whisper |
 | `whisperModel` | `"base"` | Whisper model size |
 | `hinglishMode` | `"false"` | Hinglish transcription |
 | `useReasoningModel` | `"false"` | AI text cleanup |
-| `reasoningModel` | `"gpt-3.5-turbo"` | Which model for cleanup |
-| `preferredLanguage` | `"auto"` | Language hint for Whisper |
+| `reasoningModel` | `"gpt-3.5-turbo"` | Model for cleanup |
+| `preferredLanguage` | `"auto"` | Language hint |
 | `allowOpenAIFallback` | `"false"` | Fallback to OpenAI if local fails |
 
 ---
-
-*Repo: ayyushnegii/Voiceink — Claude sessions: 2*
+*Repo: ayyushnegii/Voiceink — Claude sessions: 3*
