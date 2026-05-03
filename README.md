@@ -1,94 +1,66 @@
-# VoiceInk 🎙️
+﻿<div align="center">
 
-The open-source, privacy-first alternative to Wispr Flow.
-100% local. No screenshots. No data leaks. Free forever.
+# 🎙️ VoiceInk
 
-Works in any app on Mac, Windows, and Linux.
-Hindi + English + 100 more languages supported.
+**AI-powered voice transcription — offline, private, and blazing fast.**
 
-Built by @ayyushnegii
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](https://github.com/ayyushnegii/voiceink/releases)
+[![Node](https://img.shields.io/badge/Node.js-18%2B-green)](https://nodejs.org)
+
+</div>
 
 ---
 
-## Why VoiceInk?
+## What is VoiceInk?
 
-Wispr Flow is the market leader in AI voice dictation but has serious problems:
-- It secretly takes periodic **screenshots** of your active window without disclosing this during onboarding
-- Your audio is routed through **both OpenAI and Meta** infrastructure
-- Its original Terms of Service **allowed training on your dictated content** — only reversed after public backlash
-- Its **Trustpilot score is 2.7/5** — most complaints are about quality degrading after the free trial ends
-- **iPad + Linux support is broken or nonexistent**
-- It is **closed-source, cloud-dependent, and expensive**
-- It completely **ignores Hindi and regional Indian languages** — a massive untapped market
-
-VoiceInk fills this gap: a tool that is 100% local, fully transparent, free forever, and built with Indian language support from day one.
+VoiceInk is a desktop app that transcribes your voice in real time using **Whisper AI** — entirely on your device. No cloud. No subscriptions. Your audio never leaves your machine.
 
 ## Features
 
-### Phase 1 — Core (MVP)
-- **Global hotkey → record → transcribe → inject** into any active text field system-wide
-- **Local Whisper model support** — tiny, base, small, medium, large, turbo — no API key needed
-- **Model manager UI** — download, switch, and delete local models in one click
-- **Auto text injection** — paste transcribed text directly into whatever app is focused
-- **Transcription history panel** — searchable log of everything dictated, stored locally
-
-### Phase 2 — Intelligence Layer
-- **AI cleanup layer** — remove filler words, fix punctuation, auto-format
-- **Context-aware tone adjustment** — detect active window title to adjust output tone
-- **Voice snippets/shortcuts** — user-defined trigger words for quick text insertion
-- **Custom vocabulary** — add names, brand names, jargon for better accuracy
-
-### Phase 3 — Differentiation (What beats Wispr Flow)
-- **Hindi + Hinglish support** — automatic language detection mid-sentence
-- **Privacy Dashboard** — real-time view of where audio is processed
-- **Whisper mode** — low-volume dictation with accurate transcription
-- **Offline mode badge** — clear visual indicator when running 100% offline
-- **BYOK (Bring Your Own Key)** — optional cloud speed with your own API keys
-
-### Phase 4 — Polish
-- **Onboarding wizard** — first-run setup experience
-- **Settings page** — full customization options
-- **System tray integration** — always accessible from menu bar/taskbar
-- **Dark/light mode** — respects system preference
-- **Linux AppImage + DEB build** — first dictation tool to properly support Linux
+- 🔒 **100% offline** — Whisper runs locally via Python bridge
+- ⚡ **Real-time transcription** with low latency
+- 🖥️ **Cross-platform** — Electron app for Windows, macOS, Linux
+- 📋 **One-click copy** to clipboard
+- 🎚️ **Model selection** — choose speed vs accuracy tradeoff
 
 ## Tech Stack
 
 | Layer | Technology |
-|---|---|
-| Desktop shell | Electron (cross-platform: Mac, Windows, Linux) |
-| Frontend UI | React 19 + TypeScript |
-| Styling | Tailwind CSS v4 + shadcn/ui components |
-| Local STT | OpenAI Whisper (tiny/base/small/medium/large/turbo) |
-| Fast STT | NVIDIA Parakeet (optional, for GPU users) |
-| Cloud STT (BYOK) | Groq Whisper API (user provides own key) |
-| AI cleanup | Anthropic Claude API or OpenAI (BYOK, optional) |
-| Python bridge | whisper_bridge.py (local model runner) |
-| Local database | better-sqlite3 (transcription history, vocabulary, snippets) |
-| Global hotkey | Customizable, default: backtick ` |
-| Build system | Vite + Electron Builder |
+|-------|-----------|
+| Shell | Electron + Node.js |
+| AI Engine | OpenAI Whisper (local) |
+| Bridge | Python (`whisper_bridge.py`) |
+| Packaging | electron-builder |
 
-## Anti-Wispr-Flow Principles
+## Quick Start
 
-We will **NEVER**:
-- Take screenshots of your screen — use active window title only for context
-- Send audio to third parties without explicit per-session user consent
-- Require an account to use any core feature
-- Degrade quality — open source, no trial, no paywalls on core features
-- Store audio files — only the final transcribed text (and only locally)
-- Send usage data without opt-in
+```bash
+# Prerequisites: Node 18+, Python 3.9+, pip
+git clone https://github.com/ayyushnegii/voiceink.git
+cd voiceink
+npm install
+pip install openai-whisper
+npm start
+```
 
-## Getting Started
+See [LOCAL_WHISPER_SETUP.md](LOCAL_WHISPER_SETUP.md) for GPU acceleration setup.
 
-1. Clone the repo: `git clone https://github.com/ayyushnegii/voiceink.git`
-2. Install dependencies: `npm install`
-3. Run in dev mode: `npm run dev`
-4. First run will trigger the onboarding wizard
+## Project Structure
+
+```
+voiceink/
+├── src/           # Renderer (UI)
+├── scripts/       # Build & setup scripts
+├── main.js        # Electron main process
+├── preload.js     # Context bridge
+└── whisper_bridge.py  # Python ↔ Electron bridge
+```
 
 ## Contributing
 
-Contributions are welcome! Please read our contributing guidelines and open issues for feature requests or bug reports.
+See [CONTRIBUTING.md](CONTRIBUTING.md). Issues and PRs welcome.
 
 ## License
 
-MIT License — free to use, modify, and distribute.
+MIT © [Ayush Negi](https://github.com/ayyushnegii)

@@ -1,4 +1,3 @@
-const Database = require("better-sqlite3");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -6,30 +5,19 @@ const { app } = require("electron");
 
 class DatabaseManager {
   constructor() {
-    this.db = null;
+    const dbFileName =
+      process.env.NODE_ENV === "development"
+        ? "transcriptions-dev.json"
+        : "transcriptions.json";
+    this.dbPath = path.join(app.getPath("userData"), dbFileName);
     this.initDatabase();
   }
 
   initDatabase() {
     try {
-      const dbFileName =
-        process.env.NODE_ENV === "development"
-          ? "transcriptions-dev.db"
-          : "transcriptions.db";
-
-      const dbPath = path.join(app.getPath("userData"), dbFileName);
-
-      this.db = new Database(dbPath);
-
-      this.db.exec(`
-        CREATE TABLE IF NOT EXISTS transcriptions (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          text TEXT NOT NULL,
-          timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-      `);
-
+      if (!fs.existsSync(this.dbPath)) {
+        fs.writeFileSync(this.dbPath, JSON.stringify({ transcriptions: [], nextId: 1 }));
+      }
       return true;
     } catch (error) {
       console.error("Database initialization failed:", error.message);
@@ -37,18 +25,38 @@ class DatabaseManager {
     }
   }
 
+  _readDb() {
+    try {
+      const data = fs.readFileSync(this.dbPath, 'utf8');
+      return JSON.parse(data);
+    } catch (e) {
+      return { transcriptions: [], nextId: 1 };
+    }
+  }
+
+  _writeDb(data) {
+    fs.writeFileSync(this.dbPath, JSON.stringify(data, null, 2));
+  }
+
   saveTranscription(text) {
     try {
-      if (!this.db) {
-        throw new Error("Database not initialized");
-      }
-      const stmt = this.db.prepare(
-        "INSERT INTO transcriptions (text) VALUES (?)"
-      );
-      const result = stmt.run(text);
+      const db = this._readDb();
+      const id = db.nextId++;
+      
+      // better-sqlite3 would return SQLite datetime strings like "YYYY-MM-DD HH:MM:SS"
+      // or ISO strings depending on how it was queried. Let's use ISO.
+      const now = new Date().toISOString();
+      const transcription = {
+        id,
+        text,
+        timestamp: now,
+        created_at: now
+      };
+      
+      db.transcriptions.push(transcription);
+      this._writeDb(db);
 
-
-      return { id: result.lastInsertRowid, success: true };
+      return { id, success: true };
     } catch (error) {
       console.error("Error saving transcription:", error.message);
       throw error;
@@ -57,14 +65,10 @@ class DatabaseManager {
 
   getTranscriptions(limit = 50) {
     try {
-      if (!this.db) {
-        throw new Error("Database not initialized");
-      }
-      const stmt = this.db.prepare(
-        "SELECT * FROM transcriptions ORDER BY timestamp DESC LIMIT ?"
-      );
-      const transcriptions = stmt.all(limit);
-      return transcriptions;
+      const db = this._readDb();
+      // Sort by timestamp desc
+      db.transcriptions.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      return db.transcriptions.slice(0, limit);
     } catch (error) {
       console.error("Error getting transcriptions:", error.message);
       throw error;
@@ -73,12 +77,11 @@ class DatabaseManager {
 
   clearTranscriptions() {
     try {
-      if (!this.db) {
-        throw new Error("Database not initialized");
-      }
-      const stmt = this.db.prepare("DELETE FROM transcriptions");
-      const result = stmt.run();
-      return { cleared: result.changes, success: true };
+      const db = this._readDb();
+      const count = db.transcriptions.length;
+      db.transcriptions = [];
+      this._writeDb(db);
+      return { cleared: count, success: true };
     } catch (error) {
       console.error("Error clearing transcriptions:", error.message);
       throw error;
@@ -87,15 +90,14 @@ class DatabaseManager {
 
   deleteTranscription(id) {
     try {
-      if (!this.db) {
-        throw new Error("Database not initialized");
-      }
-      const stmt = this.db.prepare("DELETE FROM transcriptions WHERE id = ?");
-      const result = stmt.run(id);
-      console.log(
-        `🗑️ Deleted transcription ${id}, affected rows: ${result.changes}`
-      );
-      return { success: result.changes > 0 };
+      const db = this._readDb();
+      const initialLength = db.transcriptions.length;
+      db.transcriptions = db.transcriptions.filter(t => t.id !== id);
+      this._writeDb(db);
+      
+      const changes = initialLength - db.transcriptions.length;
+      console.log(`🗑️ Deleted transcription ${id}, affected rows: ${changes}`);
+      return { success: changes > 0 };
     } catch (error) {
       console.error("❌ Error deleting transcription:", error);
       throw error;
@@ -105,15 +107,9 @@ class DatabaseManager {
   cleanup() {
     console.log("Starting database cleanup...");
     try {
-      const dbPath = path.join(
-        app.getPath("userData"),
-        process.env.NODE_ENV === "development"
-          ? "transcriptions-dev.db"
-          : "transcriptions.db"
-      );
-      if (fs.existsSync(dbPath)) {
-        fs.unlinkSync(dbPath);
-        console.log("✅ Database file deleted:", dbPath);
+      if (fs.existsSync(this.dbPath)) {
+        fs.unlinkSync(this.dbPath);
+        console.log("✅ Database file deleted:", this.dbPath);
       }
     } catch (error) {
       console.error("❌ Error deleting database file:", error);
