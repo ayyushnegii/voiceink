@@ -680,9 +680,14 @@ class WhisperManager {
     try {
       return await runCommand(pythonCmd, ["-m", "pip", "install", "-U", "openai-whisper"], { timeout: TIMEOUTS.DOWNLOAD });
     } catch (error) {
-      if (error.message.includes("Permission denied") || error.message.includes("access is denied")) {
-        // Retry with user installation
-        return await runCommand(pythonCmd, ["-m", "pip", "install", "--user", "-U", "openai-whisper"], { timeout: TIMEOUTS.DOWNLOAD });
+      if (error.message.includes("Permission denied") || error.message.includes("access is denied") || error.message.includes("externally-managed-environment")) {
+        // Retry with --break-system-packages for uv-managed environments
+        try {
+          return await runCommand(pythonCmd, ["-m", "pip", "install", "--break-system-packages", "-U", "openai-whisper"], { timeout: TIMEOUTS.DOWNLOAD });
+        } catch (breakSysError) {
+          // Fallback to user installation
+          return await runCommand(pythonCmd, ["-m", "pip", "install", "--user", "-U", "openai-whisper"], { timeout: TIMEOUTS.DOWNLOAD });
+        }
       }
       
       // If we still get TOML error after pip upgrade, try legacy resolver for whisper
