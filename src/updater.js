@@ -1,5 +1,6 @@
-const { autoUpdater } = require("electron-updater");
-const { ipcMain } = require("electron");
+const ipcMainModule = require("electron");
+let ipcMain = null;
+let autoUpdater = null;
 
 class UpdateManager {
   constructor() {
@@ -8,8 +9,37 @@ class UpdateManager {
     this.updateAvailable = false;
     this.updateDownloaded = false;
 
+    // Lazy-load autoUpdater and ipcMain to avoid issues during module initialization
+    this.getAutoUpdater();
+    this.getIPCMain();
+
     this.setupAutoUpdater();
     this.setupIPCHandlers();
+  }
+
+  getAutoUpdater() {
+    if (!autoUpdater) {
+      try {
+        const { autoUpdater: updater } = require("electron-updater");
+        autoUpdater = updater;
+      } catch (error) {
+        console.warn("⚠️ electron-updater not available:", error.message);
+        return null;
+      }
+    }
+    return autoUpdater;
+  }
+
+  getIPCMain() {
+    if (!ipcMain) {
+      try {
+        ipcMain = ipcMainModule.ipcMain;
+      } catch (error) {
+        console.warn("⚠️ ipcMain not available:", error.message);
+        return null;
+      }
+    }
+    return ipcMain;
   }
 
   setWindows(mainWindow, controlPanelWindow) {
@@ -24,27 +54,32 @@ class UpdateManager {
       return;
     }
 
+    const au = this.getAutoUpdater();
+    if (!au) return;
+
     // Configure auto-updater for GitHub releases
-    autoUpdater.setFeedURL({
+    au.setFeedURL({
       provider: "github",
       owner: "HeroTools",
       repo: "open-wispr",
       private: false,
     });
 
-    // Auto-updater logging
-    autoUpdater.logger = console;
+    au.logger = console;
 
     // Set up event handlers
     this.setupEventHandlers();
   }
 
   setupEventHandlers() {
-    autoUpdater.on("checking-for-update", () => {
+    const au = this.getAutoUpdater();
+    if (!au) return;
+
+    au.on("checking-for-update", () => {
       console.log("🔍 Checking for updates...");
     });
 
-    autoUpdater.on("update-available", (info) => {
+    au.on("update-available", (info) => {
       console.log("📥 Update available:", info);
       this.updateAvailable = true;
 
@@ -52,7 +87,7 @@ class UpdateManager {
       this.notifyRenderers("update-available", info);
     });
 
-    autoUpdater.on("update-not-available", (info) => {
+    au.on("update-not-available", (info) => {
       console.log("✅ Update not available:", info);
       this.updateAvailable = false;
 
@@ -60,7 +95,7 @@ class UpdateManager {
       this.notifyRenderers("update-not-available", info);
     });
 
-    autoUpdater.on("error", (err) => {
+    au.on("error", (err) => {
       console.error("❌ Auto-updater error:", err);
       this.updateAvailable = false;
       this.updateDownloaded = false;
@@ -69,7 +104,7 @@ class UpdateManager {
       this.notifyRenderers("update-error", err);
     });
 
-    autoUpdater.on("download-progress", (progressObj) => {
+    au.on("download-progress", (progressObj) => {
       let logMessage = `📊 Download speed: ${progressObj.bytesPerSecond}`;
       logMessage += ` - Downloaded ${progressObj.percent}%`;
       logMessage += ` (${progressObj.transferred}/${progressObj.total})`;
@@ -79,7 +114,7 @@ class UpdateManager {
       this.notifyRenderers("update-download-progress", progressObj);
     });
 
-    autoUpdater.on("update-downloaded", (info) => {
+    au.on("update-downloaded", (info) => {
       console.log("✅ Update downloaded:", info);
       this.updateDownloaded = true;
 
@@ -98,8 +133,11 @@ class UpdateManager {
   }
 
   setupIPCHandlers() {
+    const ipc = this.getIPCMain();
+    if (!ipc) return;
+
     // Check for updates manually
-    ipcMain.handle("check-for-updates", async () => {
+    ipc.handle("check-for-updates", async () => {
       try {
         if (process.env.NODE_ENV === "development") {
           console.log("⚠️ Update check skipped in development mode");
@@ -110,7 +148,12 @@ class UpdateManager {
         }
 
         console.log("🔍 Manual update check requested...");
-        const result = await autoUpdater.checkForUpdates();
+        const au = this.getAutoUpdater();
+        if (!au) {
+          return { updateAvailable: false, message: "Update checker not available" };
+        }
+
+        const result = await au.checkForUpdates();
 
         if (result && result.updateInfo) {
           console.log("📋 Update check result:", result.updateInfo);
@@ -135,7 +178,7 @@ class UpdateManager {
     });
 
     // Download update
-    ipcMain.handle("download-update", async () => {
+    ipc.handle("download-update", async () => {
       try {
         if (process.env.NODE_ENV === "development") {
           console.log("⚠️ Update download skipped in development mode");
@@ -146,7 +189,12 @@ class UpdateManager {
         }
 
         console.log("📥 Manual update download requested...");
-        await autoUpdater.downloadUpdate();
+        const au = this.getAutoUpdater();
+        if (!au) {
+          return { success: false, message: "Update checker not available" };
+        }
+
+        await au.downloadUpdate();
 
         return { success: true, message: "Update download started" };
       } catch (error) {
@@ -156,7 +204,7 @@ class UpdateManager {
     });
 
     // Install update
-    ipcMain.handle("install-update", async () => {
+    ipc.handle("install-update", async () => {
       try {
         if (process.env.NODE_ENV === "development") {
           console.log("⚠️ Update installation skipped in development mode");
@@ -177,8 +225,13 @@ class UpdateManager {
         console.log("🔄 Installing update and restarting...");
         
         // Use setImmediate to ensure the response is sent before quitting
+        const au = this.getAutoUpdater();
+        if (!au) {
+          return { success: false, message: "Update checker not available" };
+        }
+
         setImmediate(() => {
-          autoUpdater.quitAndInstall();
+          au.quitAndInstall();
         });
 
         return { success: true, message: "Update installation started" };
@@ -189,7 +242,7 @@ class UpdateManager {
     });
 
     // Get app version
-    ipcMain.handle("get-app-version", async () => {
+    ipc.handle("get-app-version", async () => {
       try {
         const { app } = require("electron");
         const version = app.getVersion();
@@ -201,7 +254,7 @@ class UpdateManager {
     });
 
     // Get update status
-    ipcMain.handle("get-update-status", async () => {
+    ipc.handle("get-update-status", async () => {
       try {
         return {
           updateAvailable: this.updateAvailable,
@@ -221,7 +274,10 @@ class UpdateManager {
       // Wait a bit for the app to fully initialize
       setTimeout(() => {
         console.log("🔄 Checking for updates on startup...");
-        autoUpdater.checkForUpdatesAndNotify();
+        const au = this.getAutoUpdater();
+        if (!au) return;
+        
+        au.checkForUpdatesAndNotify();
       }, 5000);
     }
   }
